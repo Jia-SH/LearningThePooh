@@ -8,7 +8,8 @@ let isMobile = !!(/Mobile/.exec(navigator.userAgent));
 let urlMap = {
     "index": "https://www.xuexi.cn",
     "points": "https://pc.xuexi.cn/points/my-points.html",
-    "scoreApi": "https://pc-api.xuexi.cn/open/api/score/today/queryrate",
+    // "scoreApi": "https://pc-api.xuexi.cn/open/api/score/today/queryrate",
+    "scoreApi": "https://pc-proxy-api.xuexi.cn/api/score/days/listScoreProgress?sence=score&deviceType=2",
     "channelApi": "https://www.xuexi.cn/lgdata/"
 };
 let channel = {
@@ -52,71 +53,70 @@ let channel = {
 
 //检查用户积分数据
 function getPointsData(callback) {
+    console.log('-getPointsData---')
     if (scoreTabId) {
-        let xhr = new XMLHttpRequest();
-        xhr.open("GET", urlMap.scoreApi);
-        xhr.setRequestHeader("Pragma", "no-cache");
-        xhr.onreadystatechange = function () {
-            if (xhr.readyState === 4 && xhr.status === 200) {
-                let res = JSON.parse(xhr.responseText);
-                if (res.hasOwnProperty("code") && parseInt(res.code) === 200) {
-                    if (checkScoreAPI(res)) {
-                        let points = 0;
-                        let ruleList = [1, 2, 9, 1002, 1003];
-                        for (let key in res.data.dayScoreDtos) {
-                            if (!res.data.dayScoreDtos.hasOwnProperty(key)) {
-                                continue;
+        fetch(urlMap.scoreApi)
+            .then(response => response.text())
+            .then(text => {
+                    let res = JSON.parse(text);
+                    if (res.hasOwnProperty("code") && parseInt(res.code) === 200) {
+                        if (checkScoreAPI(res)) {
+                            let points = getTodayScore(res)
+                            if (!isMobile) {
+                                chrome.action.setBadgeText({"text": points.toString()});
                             }
-                            if (ruleList.indexOf(res.data.dayScoreDtos[key].ruleId) !== -1) {
-                                points += res.data.dayScoreDtos[key].currentScore;
+                            if (typeof callback === "function") {
+                                callback(res.data);
                             }
-                        }
-                        if (!isMobile) {
-                            chrome.browserAction.setBadgeText({"text": points.toString()});
-                        }
-                        if (typeof callback === "function") {
-                            callback(res.data);
-                        }
+                        } 
+                        // else {
+                        //     notice(chrome.i18n.getMessage("extScoreApi"), chrome.i18n.getMessage("extUpdate"));
+                        // }
                     } else {
-                        notice(chrome.i18n.getMessage("extScoreApi"), chrome.i18n.getMessage("extUpdate"));
+                        if (runningTabId) {
+                            chrome.tabs.remove(runningTabId);
+                        }
+                        if (runningWindowId) {
+                            closeWindow();
+                        }
+                        chrome.tabs.update(scoreTabId, {"active": true, "url": getLoginUrl()});
                     }
-                } else {
-                    if (runningTabId) {
-                        chrome.tabs.remove(runningTabId);
-                    }
-                    if (runningWindowId) {
-                        closeWindow();
-                    }
-                    chrome.tabs.update(scoreTabId, {"active": true, "url": getLoginUrl()});
                 }
-            }
-        };
-        xhr.send();
+            )
     }
 }
 
 //检查积分接口数据结构
 function checkScoreAPI(res) {
     if (res.hasOwnProperty("data")) {
-        if (res.data.hasOwnProperty("dayScoreDtos")) {
+        if (res.data.hasOwnProperty("taskProgress")) {
             let pass = 0;
-            let ruleList = [1, 2, 9, 1002, 1003];
-            for (let key in res.data.dayScoreDtos) {
-                if (!res.data.dayScoreDtos.hasOwnProperty(key)) {
-                    continue;
-                }
-                if (res.data.dayScoreDtos[key].hasOwnProperty("ruleId") && res.data.dayScoreDtos[key].hasOwnProperty("currentScore") && res.data.dayScoreDtos[key].hasOwnProperty("dayMaxScore")) {
-                    if (ruleList.indexOf(res.data.dayScoreDtos[key].ruleId) !== -1) {
+            let titles = ['我要选读文章','视听学习','视听学习时长']
+            let i = 0
+            for ( i in res.data.taskProgress) {
+                let task = res.data.taskProgress[i]
+                if (task.hasOwnProperty("title") && task.hasOwnProperty("currentScore") && task.hasOwnProperty("dayMaxScore")) {
+                    if (titles.indexOf(task.title) !== -1) {
                         ++pass;
                     }
                 }
             }
-            if (pass === 5) {
+            if (pass === 3) {
                 return true;
             }
         }
     }
     return false;
+}
+
+function getTodayScore(res) {
+    let score = 0;
+    if (res.hasOwnProperty("data")) {
+        if (res.data.hasOwnProperty("totalScore")) {
+            score = res.data.totalScore
+        }
+    }
+    return score;
 }
 
 //检查首页内容数据
@@ -141,85 +141,77 @@ function getChannelData(type, callback) {
     }
 
     setTimeout(function () {
-        let xhr = new XMLHttpRequest();
-        xhr.open("GET", urlMap.channelApi + channelArr[0] + ".json?_st=" + Math.floor(Date.now() / 6e4));
-        xhr.setRequestHeader("Accept", "application/json");
-        xhr.onreadystatechange = function () {
-            if (xhr.readyState === 4) {
-                if (xhr.status === 200) {
-                    let res = JSON.parse(xhr.responseText);
-                    let list = [];
-                    let pass = [];
-                    let url;
+        fetch(urlMap.channelApi+channelArr[0]+'.json?_st=' + Math.floor(Date.now() / 6e4))
+        .then(response => response.text())
+        .then(text => {
+            let res = JSON.parse(text);
+            let list = [];
+            let pass = [];
+            let url;
 
-                    for (key in res) {
-                        if (!res.hasOwnProperty(key)) {
+            for (key in res) {
+                if (res[key].hasOwnProperty("url")) {
+                    url = res[key].url;
+                    if (type === 'article') {
+                        if (url.indexOf("e43e220633a65f9b6d8b53712cba9caa") === -1 && url.indexOf("lgpage/detail/index") === -1) {
                             continue;
                         }
-                        if (res[key].hasOwnProperty("url")) {
-                            url = res[key].url;
-                            if (type === 'article') {
-                                if (url.indexOf("e43e220633a65f9b6d8b53712cba9caa") === -1 && url.indexOf("lgpage/detail/index") === -1) {
-                                    continue;
-                                }
-                            } else {
-                                if (url.indexOf("cf94877c29e1c685574e0226618fb1be") === -1 && url.indexOf("7f9f27c65e84e71e1b7189b7132b4710") === -1 && url.indexOf("lgpage/detail/index") === -1) {
-                                    continue;
-                                }
-                            }
-                            if (list.indexOf(url) === -1 && pass.indexOf(url) === -1) {
-                                if (usedUrls[type].indexOf(url) === -1) {
-                                    list.push(url);
-                                } else {
-                                    pass.push(url);
-                                }
-                            }
+                    } else {
+                        if (url.indexOf("cf94877c29e1c685574e0226618fb1be") === -1 && url.indexOf("7f9f27c65e84e71e1b7189b7132b4710") === -1 && url.indexOf("lgpage/detail/index") === -1) {
+                            continue;
                         }
                     }
-                    shuffle(list);
-                    shuffle(pass);
-                    list.concat(pass);
-
-                    if (list.length) {
-                        if (typeof callback === "function") {
-                            callback(list);
+                    if (list.indexOf(url) === -1 && pass.indexOf(url) === -1) {
+                        if (usedUrls[type].indexOf(url) === -1) {
+                            list.push(url);
+                        } else {
+                            pass.push(url);
                         }
-                    } else {
-                        notice(chrome.i18n.getMessage("extChannelApi"), chrome.i18n.getMessage("extUpdate"));
                     }
                 }
             }
-        };
-        xhr.send();
+            shuffle(list);
+            shuffle(pass);
+            list.concat(pass);
+
+            if (list.length) {
+                if (typeof callback === "function") {
+                    callback(list);
+                }
+            } 
+            // else {
+            //     notice(chrome.i18n.getMessage("extChannelApi"), chrome.i18n.getMessage("extUpdate"));
+            // }
+            })
     }, 1000 + Math.floor(Math.random() * 3000));
 }
 
 //自动积分
 function autoEarnPoints(timeout) {
+    console.log('-autoEarnPoints---')
     let url;
     let newTime = 0;
     setTimeout(function () {
         getPointsData(function (data) {
-            let score = data.dayScoreDtos;
+            let score = data.taskProgress;
             let type;
 
             for (let key in score) {
                 if (!score.hasOwnProperty(key)) {
                     continue;
                 }
-                switch (score[key].ruleId) {
-                    case 1:
-                    case 1002:
+                switch (score[key].title) {
+                    case '我要选读文章':
                         if (score[key].currentScore < score[key].dayMaxScore) {
                             type = "article";
                             newTime = 35 * 1000 + Math.floor(Math.random() * 150 * 1000);
                         }
                         break;
-                    case 2:
-                    case 1003:
+                    case '视听学习':
+                    case '视听学习时长':
                         if (score[key].currentScore < score[key].dayMaxScore) {
                             type = "video";
-                            newTime = 125 * 1000 + Math.floor(Math.random() * 120 * 1000);
+                            newTime = 150 * 1000 + Math.floor(Math.random() * 120 * 1000);
                         }
                         break;
                 }
@@ -343,7 +335,7 @@ function closeWindow(windowId) {
         if (scoreWindowId) {
             chrome.windows.remove(scoreWindowId);
         }
-        notice(chrome.i18n.getMessage("extFinish"));
+        // notice(chrome.i18n.getMessage("extFinish"));
     }
 }
 
@@ -353,10 +345,11 @@ function getLoginUrl() {
     return chrome.runtime.getURL("login" + lang + ".html");
 }
 
+
 //扩展按钮点击事件
-chrome.browserAction.onClicked.addListener(function (tab) {
+chrome.action.onClicked.addListener(tab =>  {
     if (chromeVersion < 45 && firefoxVersion < (isMobile ? 55 : 48)) {
-        notice(chrome.i18n.getMessage("extVersion"));
+        // notice(chrome.i18n.getMessage("extVersion"));
     } else {
         if (!isMobile) {
             if (scoreTabId) {
@@ -407,13 +400,18 @@ if (!isMobile) {
             runningWindowId = 0;
         } else if (windowId === scoreWindowId) {
             scoreWindowId = 0;
-            chrome.browserAction.setBadgeText({"text": ""});
+            chrome.action.setBadgeText({"text": ""});
         }
     });
 }
 
 //通信事件
-chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
+chrome.runtime.onMessage.addListener( (request, sender, sendResponse) => {
+    console.log('--*******------')
+    console.log(request)
+    console.log(sender)
+    console.log(sendResponse)
+    console.log('---**********------')
     switch (request.method) {
         case "checkTab":
             if (sender.tab.windowId === runningWindowId || sender.tab.id === runningTabId || sender.tab.id === scoreTabId) {
@@ -436,7 +434,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                             userId = data.userId;
                             createWindow(urlMap.index, function (window) {
                                 runningWindowId = window.id;
-                                notice(chrome.i18n.getMessage("extWorking"), chrome.i18n.getMessage("extWarning"));
+                                // notice(chrome.i18n.getMessage("extWorking"), chrome.i18n.getMessage("extWarning"));
                                 setTimeout(function () {
                                     getChannelData("article", function (list) {
                                         channelUrls["article"] = list;

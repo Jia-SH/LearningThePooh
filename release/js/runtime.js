@@ -32,7 +32,7 @@ chrome.runtime.sendMessage({"method": "checkTab"}, {}, function (response) {
                 type = "video";
             }
             setTimeout(function () {
-                document.querySelector(".content").click();
+                document.querySelector(".videoSet-article-video-part").click();
             }, 1000 + Math.floor(Math.random() * 3000));
 
             setTimeout(function () {
